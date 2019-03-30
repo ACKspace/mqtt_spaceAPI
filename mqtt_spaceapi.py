@@ -64,6 +64,9 @@ def on_mqtt_message( client, userdata, message ):
         print( "received message: ", payload["DHT11"]["Temperature"], "C" )
         print( "received message: ", payload["DHT11"]["Humidity"], "%" )
         spaceapi_update( str( message.topic.split("/")[1] ), payload["DHT11"]["Temperature"], "temperature" )
+    elif ( u"MAX6675" in payload ):
+        print( "received message: ", payload["MAX6675"]["ProbeTemperature"], "C" )
+        spaceapi_update( str( message.topic.split("/")[1] ), payload["MAX6675"]["ProbeTemperature"], "temperature" )    
     else:
         print( "unknown message: ", payload )
 

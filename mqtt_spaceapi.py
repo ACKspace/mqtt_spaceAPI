@@ -44,6 +44,10 @@ def spaceapi_update( _topic, _value, _type ):
         print( r.headers )
         print( r.content ) # expect {"message":"ok"}
 
+def on_connect(client, userdata, flags, rc):                                                 
+    # Subscribe to default tasmota sensor topics
+    client.subscribe( "tele/+/SENSOR" )
+
 def on_mqtt_message( client, userdata, message ):
     # parse payload
     payload = json.loads( message.payload )
@@ -79,11 +83,10 @@ def signal_handler(signal, frame):
     sys.exit(0)
 
 signal.signal(signal.SIGINT, signal_handler)
+client.on_connect = on_connect
 client.on_message = on_mqtt_message
 
 client.connect( broker )
-# Subscribe to default tasmota sensor topics
-client.subscribe( "tele/+/SENSOR" )
 time.sleep( 2 )
 client.loop_forever()
 

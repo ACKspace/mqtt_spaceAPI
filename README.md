@@ -7,3 +7,5 @@ Set the BROKER and API_KEY environment variables (or run with):
 Some optional environment variables:
 * `ANNEX`: name of an annex location, for example `@xopr's`
 * `DEBUG`: enable debug data on both client and server
+* `USER`: MQTT username
+* `PASS`: MQTT password

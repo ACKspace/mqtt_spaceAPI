@@ -23,6 +23,8 @@ def set_interval(func, sec):
     t.start()
     return t
 
+username = os.environ.get('USER', None)
+password = os.environ.get('PASS', None)
 debug = os.environ.get('DEBUG', None)
 annex = os.environ.get('ANNEX', None)
 broker = os.environ.get('BROKER', None)
@@ -194,7 +196,13 @@ def on_connect(client, userdata, flags, rc):
         client.subscribe( mqtt_sensor_topics )
         client.subscribe( mqtt_spacestate_topic )
     else:
-        print( "Connection to broker unsuccessful", rc )
+        print( "Connection to broker unsuccessful:" )
+        if rc == 1: print( "incorrect protocol version" )
+        elif rc == 2: print( "invalid client identifier" )
+        elif rc == 3: print( "server unavailable" )
+        elif rc == 4: print( "bad username or password" )
+        elif rc == 5: print( "not authorised" )
+        else: print( "Errorcode: ", rc )
 
 def on_disconnect(client, userdata,  rc):
     print("Disconnected from broker")
@@ -216,6 +224,9 @@ client.on_message = on_mqtt_message
 client.on_connect=on_connect
 client.on_disconnect = on_disconnect
 client.connected_flag = False
+
+if username and password:
+    client.username_pw_set(username=username,password=password)
 
 client.connect( broker, port = 1883, keepalive = 60 )
 throttle = 0

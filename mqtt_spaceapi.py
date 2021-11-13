@@ -14,6 +14,7 @@ import sys, signal
 import requests
 import os
 import threading
+import ssl
 
 def set_interval(func, sec):
     def func_wrapper():
@@ -228,7 +229,13 @@ client.connected_flag = False
 if username and password:
     client.username_pw_set(username=username,password=password)
 
-client.connect( broker, port = 1883, keepalive = 60 )
+client.tls_set( ca_certs="./ca.crt",
+                certfile=None,
+                keyfile=None,
+                cert_reqs=ssl.CERT_REQUIRED,
+                ciphers=None )
+
+client.connect( broker, port = 8883, keepalive = 60 )
 throttle = 0
 set_interval( send_update, 1 )
 

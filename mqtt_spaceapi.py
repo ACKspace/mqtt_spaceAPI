@@ -44,7 +44,7 @@ if not annex:
     # base: ackspace, common, outside, services, offsite, [participant]
     # room: slackspace, hackspace, stackspace, courtyard
     # device: spacestate, temperature, hackswitch, fluorescent1
-    mqtt_topic = "+/+/+/tele/SENSOR"
+    mqtt_sensor_topics = "+/+/+/tele/SENSOR"
     mqtt_spacestate_topic = "ackspace/hackspace/spacestate/#"
 else:
     # Custom annex topic (modify to suit your personal settings)

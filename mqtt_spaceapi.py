@@ -16,6 +16,9 @@ import os
 import threading
 import ssl
 
+__location__ = os.path.realpath(
+    os.path.join(os.getcwd(), os.path.dirname(__file__)))
+
 def set_interval(func, sec):
     def func_wrapper():
         set_interval(func, sec)
@@ -229,7 +232,7 @@ client.connected_flag = False
 if username and password:
     client.username_pw_set(username=username,password=password)
 
-client.tls_set( ca_certs="./ca.crt",
+client.tls_set( ca_certs=os.path.join(__location__, "./ca.crt"),
                 certfile=None,
                 keyfile=None,
                 cert_reqs=ssl.CERT_REQUIRED,

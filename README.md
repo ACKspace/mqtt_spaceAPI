@@ -10,6 +10,9 @@ Assuming python3 is installed and the system is debian-alike;
   * `pip3 install paho-mqtt`
 * clone this repo locally:
   * git clone https://github.com/ACKspace/mqtt_spaceAPI
+* Copy over systemd service file (edit `Environment` variables, `User` and `ExecStart` path) and enable the service
+  * `sudo cp mqtt_spaceapi.service /etc/systemd/system/`
+  * `sudo systemctl enable mqtt_spaceapi.service`
 * optionally modify `mqtt_spaceapi.py` and change "Custom annex topic" `mqtt_sensor_topics` and `mqtt_spacestate_topic`
 * run the script inside a screen/tmux (or nohup) session (change `BROKER`, `API_KEY` and `ANNEX` accordingly):
   * `BROKER=192.168.1.42 API_KEY=ABC ANNEX="@xopr's" USER=ackspace PASS=ackspace ./mqtt_spaceapi.py`

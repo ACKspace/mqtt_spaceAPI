@@ -1,0 +1,14 @@
+[Unit]
+Description=MQTT SpaceAPI bridge
+After=network.target
+
+[Service]
+Environment=BROKER=192.168.1.42
+Environment=API_KEY=ABC
+Environment=USER=ackspace
+Environment=PASS=ackspace
+User=currentuser
+ExecStart=/home/currentuser/mqtt_spaceAPI/mqtt_spaceapi.py
+
+[Install]
+WantedBy=default.target

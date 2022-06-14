@@ -79,26 +79,27 @@ def send_update():
             "unit": []
         }
 
+        # Read sensor queue
         for name in sensor_queue:
-            sensors["type"].append( "temperature" )
+            sensors["type"].append( sensor_queue[name][2] )
             sensors["name"].append( name )
             sensors["value"].append( sensor_queue[name][1] )
-            sensors["unit"].append( "celcius" )
+            sensors["unit"].append( sensor_queue[name][3] )
             sensors["location"].append( sensor_queue[name][0] )
         sensor_queue = {}
         http_request( {
             "update": "sensors",
-            "type" : sensors["type"], # temperature, power_consumption, ..
-            "address": sensors["name"], # name (sensor id); topic[-3]
-            "value": sensors["value"],
-            "unit" : sensors["unit"], # celcius, W, ..
-            "location": sensors["location"] # topic[-4]
+            "type[]" : sensors["type"], # temperature, power_consumption, ..
+            "address[]": sensors["name"], # name (sensor id); topic[-3]
+            "value[]": sensors["value"],
+            "unit[]" : sensors["unit"], # celcius, W, ..
+            "location[]": sensors["location"] # topic[-4]
         } )
 
         throttle = 10
 
     # Always do spacestate if it was provided
-    if state is not None:
+    if state is not None: # TODO: note that it sometimes is False!
         print( "Update state: %s" % state )
         if annex is not None:
             http_request( {
@@ -150,14 +151,29 @@ def on_mqtt_message( client, userdata, message ):
     name = message.topic.split("/")[-3]
 
     if not message.topic.endswith( "SENSOR" ):
-        if "POWER1" in payload:
+        if "POWER1" in payload and name == "spacestate":
             # Spacestate
             #if (key in temp_list) or key.startswith("POWER"):
             state = payload["POWER1"] in [ "ON", "true", "True", "TRUE", "1" ]
+        elif "POWER" in payload and name == "spacestate":
+            # Spacestate
+            #if (key in temp_list) or key.startswith("POWER"):
+            state = payload["POWER"] in [ "ON", "true", "True", "TRUE", "1" ]
 
     temp_list = [ "BME280", "DHT11", "ANALOG" ]
 
     for key in payload:
+
+        # Spacestate
+        if key == "Switch1" and name == "spacestate":
+            state = payload["Switch1"] in [ "ON", "true", "True", "TRUE", "1" ]
+
+        # Only iterate lists
+        if not isinstance(payload[key], dict):
+            continue
+
+        #print( key, payload )
+
         # temperature
         if "Temperature" in payload[key]:
             # Make sure to use the Id if we're reading DS18B20 sensors
@@ -178,12 +194,16 @@ def on_mqtt_message( client, userdata, message ):
             sensor_queue[ name ] = ( location, payload[key]["Humidity"], "humidity", "hPa" )
 
         # beverage_supply
+        """
 
         # power_consumption
+        # Note that we have "Power", "ApparentPower", "ReactivePower"
+        # but also "Factor", "Voltage" and "Current"
         if "Power" in payload[key]:
-            print( "%s@%s:%sW" % (name, location, payload[key]["Power"]) )
-            sensor_queue[ name ] = ( location, payload[key]["W"], "", "Power" )
+            #print( "%s@%s:%sW" % (name, location, payload[key]["Power"]) )
+            sensor_queue[ name ] = ( location, payload[key]["Power"], "power_consumption", "W" )
 
+        """
         # wind
         # network_connections
         # account_balance
@@ -191,6 +211,8 @@ def on_mqtt_message( client, userdata, message ):
         # people_now_present
         # network_traffic
         """
+    if debug:
+        print( sensor_queue )
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:

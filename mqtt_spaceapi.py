@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 # MQTT spaceAPI 'bridge': listen to sensors and update the spaceAPI regularly
 
-# Make sure paho-mqtt and requests are installed using pip/apt/yum
+# Make sure paho-mqtt and urllib are installed using pip/apt/yum
+# Don't use requests: it has a memory leak
+# https://www.fugue.co/blog/diagnosing-and-fixing-memory-leaks-in-python.html
 
 # Set the BROKER and API_KEY environment variables or run with:
 # `BROKER=127.0.0.1 API_KEY=ABC ./mqtt_spaceapi.py`
 
-# TODO: try and connect directly to MySQL/MariaDB (hosting limitation)
 import time
 import paho.mqtt.client as paho
 import json
 import sys, signal
-import requests
+from urllib import request, parse
 import os
 import threading
 import ssl
+
+TLS = False
 
 __location__ = os.path.realpath(
     os.path.join(os.getcwd(), os.path.dirname(__file__)))
@@ -48,14 +51,14 @@ if not annex:
     # room: slackspace, hackspace, stackspace, courtyard
     # device: spacestate, temperature, hackswitch, fluorescent1
     mqtt_sensor_topics = "+/+/+/tele/SENSOR"
-    mqtt_spacestate_topic = "ackspace/hackspace/spacestate/#"
+    mqtt_spacestate_topic = "ackspace/hackspace/spacestate/"
 else:
     # Custom annex topic (modify to suit your personal settings)
     mqtt_sensor_topics = "+/+/+/+/tele/SENSOR"
-    mqtt_spacestate_topic = "mancave/groundfloor/office/hackcorner/#"
+    mqtt_spacestate_topic = "mancave/groundfloor/office/hackcorner/"
 
 
-print( "Starting mqtt-spaceAPI bridge" );
+print( "Starting mqtt-spaceAPI bridge" )
 
 sensor_queue = {}
 state = None
@@ -65,11 +68,16 @@ def send_update():
     if throttle > 0:
         throttle -= 1
 
-    if not client.connected_flag or ( len( sensor_queue ) == 0 and state == None ):
+    # Special state: we're busy updating
+    if throttle < 0:
+        return
+
+    if (client and not client.connected_flag) or ( len( sensor_queue ) == 0 and state == None ):
         return
 
     # Only do sensors after throttling (state has priority)
     if (throttle == 0) and len( sensor_queue ) > 0:
+        throttle = -1
         print( "Update sensor(s)" )
         sensors = {
             "name": [],
@@ -96,10 +104,9 @@ def send_update():
             "location[]": sensors["location"] # topic[-4]
         } )
 
-        throttle = 10
-
     # Always do spacestate if it was provided
-    if state is not None: # TODO: note that it sometimes is False!
+    if state is not None:
+        throttle = -1
         print( "Update state: %s" % state )
         if annex is not None:
             http_request( {
@@ -113,31 +120,35 @@ def send_update():
                 "update": "state",
                 "state": "1" if state else "0"
             } )
-        state = None
-        throttle = 10
+
+    # Reset state and throttle
+    state = None
+    throttle = 10
 
 def http_request( data ):
     data["key"] = spaceapi_key
 
     if debug:
         data["debug"] = True
-        print( data )
 
-    r = requests.post(spaceapi_uri, data)
-    if r.status_code == 200 and '{"message":"ok"}' in r.content.decode( 'UTF-8' ):
-        print( "API update: ok" )
-        if debug:
-            print( r.headers )
-            print( r.content ) # expect {"message":"ok"}
-    else:
-        print( "API update went wrong:" )
-        print( r.status_code ) # expect 200
-        print( r.headers )
-        print( r.content ) # expect {"message":"ok"}
+    parsed_data = parse.urlencode(data).encode("ascii")
+    
+    if debug:
+        print( parsed_data )
 
-def on_connect(client, userdata, flags, rc):
-    # Subscribe to default tasmota sensor topics
-    client.subscribe( "tele/+/SENSOR" )
+    with request.urlopen(spaceapi_uri, parsed_data) as response:
+        response_text = response.read()     
+
+        if response.status == 200 and '{"message":"ok"}' in response_text.decode( 'UTF-8' ):
+            print( "API update: ok" )
+            if debug:
+                print( response.headers )
+                print( response_text ) # expect {"message":"ok"}
+        else:
+            print( "API update went wrong:" )
+            print( responser.status ) # expect 200
+            print( response.headers )
+            print( response_text ) # expect {"message":"ok"}
 
 def on_mqtt_message( client, userdata, message ):
     global state, sensor_queue
@@ -149,13 +160,15 @@ def on_mqtt_message( client, userdata, message ):
         payload = {}
     location = message.topic.split("/")[-4]
     name = message.topic.split("/")[-3]
+    if debug:
+        print( f"incoming message from {name}: {payload}" )
 
     if not message.topic.endswith( "SENSOR" ):
-        if "POWER1" in payload and name == "spacestate":
+        if "POWER1" in payload and message.topic.startswith(mqtt_spacestate_topic):
             # Spacestate
             #if (key in temp_list) or key.startswith("POWER"):
             state = payload["POWER1"] in [ "ON", "true", "True", "TRUE", "1" ]
-        elif "POWER" in payload and name == "spacestate":
+        elif "POWER" in payload and message.topic.startswith(mqtt_spacestate_topic):
             # Spacestate
             #if (key in temp_list) or key.startswith("POWER"):
             state = payload["POWER"] in [ "ON", "true", "True", "TRUE", "1" ]
@@ -165,7 +178,7 @@ def on_mqtt_message( client, userdata, message ):
     for key in payload:
 
         # Spacestate
-        if key == "Switch1" and name == "spacestate":
+        if key == "Switch1" and message.topic.startswith(mqtt_spacestate_topic):
             state = payload["Switch1"] in [ "ON", "true", "True", "TRUE", "1" ]
 
         # Only iterate lists
@@ -212,7 +225,7 @@ def on_mqtt_message( client, userdata, message ):
         # network_traffic
         """
     if debug:
-        print( sensor_queue )
+        print( "queue", sensor_queue )
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
@@ -220,7 +233,7 @@ def on_connect(client, userdata, flags, rc):
         print( "Connected to broker" )
 
         client.subscribe( mqtt_sensor_topics )
-        client.subscribe( mqtt_spacestate_topic )
+        client.subscribe( mqtt_spacestate_topic+"#" )
     else:
         print( "Connection to broker unsuccessful:" )
         if rc == 1: print( "incorrect protocol version" )
@@ -228,41 +241,49 @@ def on_connect(client, userdata, flags, rc):
         elif rc == 3: print( "server unavailable" )
         elif rc == 4: print( "bad username or password" )
         elif rc == 5: print( "not authorised" )
+        elif rc == 7: print( "check unique client id" )
         else: print( "Errorcode: ", rc )
 
 def on_disconnect(client, userdata,  rc):
     print("Disconnected from broker")
+    if rc == 7: print( "check unique client id" )
     client.connected_flag = False
 
-client = paho.Client("syn-ack")
 
 def signal_handler(signal, frame):
     print('You pressed Ctrl+C!')
     client.unsubscribe( mqtt_sensor_topics )
-    client.unsubscribe( mqtt_spacestate_topic )
+    client.unsubscribe( mqtt_spacestate_topic+"#" )
     client.disconnect()
     client.loop_stop()
+    # TODO: it doesn't want to exit, but this allows to ctrl+c again
     sys.exit(0)
 
 signal.signal(signal.SIGINT, signal_handler)
-client.on_connect = on_connect
-client.on_message = on_mqtt_message
-client.on_connect=on_connect
-client.on_disconnect = on_disconnect
-client.connected_flag = False
 
-if username and password:
-    client.username_pw_set(username=username,password=password)
-
-client.tls_set( ca_certs=os.path.join(__location__, "./ca.crt"),
-                certfile=None,
-                keyfile=None,
-                cert_reqs=ssl.CERT_REQUIRED,
-                ciphers=None )
-
-client.connect( broker, port = 8883, keepalive = 60 )
 throttle = 0
 set_interval( send_update, 1 )
 
-client.loop_forever()
+if broker:
+    client = paho.Client("syn-ack")
+    client.on_connect = on_connect
+    client.on_message = on_mqtt_message
+    client.on_connect=on_connect
+    client.on_disconnect = on_disconnect
+    client.connected_flag = False
 
+    if username and password:
+        client.username_pw_set(username=username,password=password)
+
+    # TODO: differentiate between tls and plain text
+    if TLS:
+        client.tls_set( ca_certs=os.path.join(__location__, "./ca.crt"),
+                        certfile=None,
+                        keyfile=None,
+                        cert_reqs=ssl.CERT_REQUIRED,
+                        ciphers=None )
+    client.connect( broker, port = TLS and 8883 or 1883, keepalive = 60 )
+
+    client.loop_forever()
+else:
+    client = None

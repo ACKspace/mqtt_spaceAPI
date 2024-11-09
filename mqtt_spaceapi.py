@@ -22,13 +22,16 @@ TLS = False
 __location__ = os.path.realpath(
     os.path.join(os.getcwd(), os.path.dirname(__file__)))
 
+shutdown = False
+
 def set_interval(func, sec):
     def func_wrapper():
         set_interval(func, sec)
         func()
-    t = threading.Timer(sec, func_wrapper)
-    t.start()
-    return t
+    if not shutdown:
+        t = threading.Timer(sec, func_wrapper)
+        t.start()
+        return t
 
 username = os.environ.get('USER', None)
 password = os.environ.get('PASS', None)
@@ -57,6 +60,37 @@ else:
     mqtt_sensor_topics = "+/+/+/+/tele/SENSOR"
     mqtt_spacestate_topic = "mancave/groundfloor/office/hackcorner/"
 
+class TimerClass(threading.Thread):
+
+    def __init__(self, callback, sleep):
+        super().__init__()
+        self.callback = callback
+        self.sleep = sleep
+        self.running = True
+        self.active = False
+
+    def run(self):
+        while self.running: # Loop while self.running is true
+            if self.active:
+                for x in range(0,self.sleep):  # loop self.sleep seconds, before checking if active again
+                    if self.active: # Continue checking if we're active, in which case, continue delaying
+                        time.sleep(1)
+                self.callback() # If the Timer is activated, then run our function
+            else:
+                time.sleep(float(0.1))
+
+    def stop(self):
+        self.active = False
+        self.running = False
+
+    def activate(self):
+        self.active = True
+
+    def deactivate(self):
+        self.active = False
+
+    def setactive(self, active):
+        self.active = active
 
 print( "Starting mqtt-spaceAPI bridge" )
 
@@ -91,7 +125,7 @@ def send_update():
         for name in sensor_queue:
             sensors["type"].append( sensor_queue[name][2] )
             sensors["name"].append( name )
-            sensors["value"].append( sensor_queue[name][1] )
+            sensors["value"].append( str(sensor_queue[name][1]) )
             sensors["unit"].append( sensor_queue[name][3] )
             sensors["location"].append( sensor_queue[name][0] )
         sensor_queue = {}
@@ -123,7 +157,8 @@ def send_update():
 
     # Reset state and throttle
     state = None
-    throttle = 10
+    if throttle <= 0:
+        throttle = 10
 
 def http_request( data ):
     data["key"] = spaceapi_key
@@ -131,24 +166,27 @@ def http_request( data ):
     if debug:
         data["debug"] = True
 
-    parsed_data = parse.urlencode(data).encode("ascii")
+    parsed_data = parse.urlencode(data, doseq=True).encode("ascii")
     
     if debug:
         print( parsed_data )
 
-    with request.urlopen(spaceapi_uri, parsed_data) as response:
-        response_text = response.read()     
+    try:
+        with request.urlopen(spaceapi_uri, parsed_data) as response:
+            response_text = response.read()     
 
-        if response.status == 200 and '{"message":"ok"}' in response_text.decode( 'UTF-8' ):
-            print( "API update: ok" )
-            if debug:
+            if response.status == 200 and '{"message":"ok"}' in response_text.decode( 'UTF-8' ):
+                print( "API update: ok" )
+                if debug:
+                    print( response.headers )
+                    print( response_text ) # expect {"message":"ok"}
+            else:
+                print( "API update went wrong:" )
+                print( responser.status ) # expect 200
                 print( response.headers )
                 print( response_text ) # expect {"message":"ok"}
-        else:
-            print( "API update went wrong:" )
-            print( responser.status ) # expect 200
-            print( response.headers )
-            print( response_text ) # expect {"message":"ok"}
+    except:
+        print( "exception: http request failed!" )
 
 def on_mqtt_message( client, userdata, message ):
     global state, sensor_queue
@@ -246,36 +284,42 @@ def on_connect(client, userdata, flags, rc):
 
 def on_disconnect(client, userdata,  rc):
     print("Disconnected from broker")
-    if rc == 7: print( "check unique client id" )
+    print( rc )
     client.connected_flag = False
 
 
+interval = None
 def signal_handler(signal, frame):
     print('You pressed Ctrl+C!')
+    shutdown = True
     client.unsubscribe( mqtt_sensor_topics )
     client.unsubscribe( mqtt_spacestate_topic+"#" )
     client.disconnect()
     client.loop_stop()
-    # TODO: it doesn't want to exit, but this allows to ctrl+c again
-    sys.exit(0)
+    if interval:
+        interval.stop()
+        interval.join()
 
 signal.signal(signal.SIGINT, signal_handler)
 
 throttle = 0
-set_interval( send_update, 1 )
+# either
+#set_interval( send_update, 1 )
+# or:
+interval = TimerClass(send_update, 1)
+interval.start()
+interval.activate()
 
 if broker:
-    client = paho.Client("syn-ack")
+    client = paho.Client("syn-ack-xopr")
     client.on_connect = on_connect
     client.on_message = on_mqtt_message
-    client.on_connect=on_connect
     client.on_disconnect = on_disconnect
     client.connected_flag = False
 
     if username and password:
         client.username_pw_set(username=username,password=password)
 
-    # TODO: differentiate between tls and plain text
     if TLS:
         client.tls_set( ca_certs=os.path.join(__location__, "./ca.crt"),
                         certfile=None,
